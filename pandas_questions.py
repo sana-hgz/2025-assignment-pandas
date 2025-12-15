@@ -114,7 +114,8 @@ def plot_referendum_map(referendum_result_by_regions):
     gdf['code'] = gdf['code'].astype(str)
     # referendum_result_by_regions is indexed by code_reg (strings like '01')
     referendum_result_by_regions = referendum_result_by_regions.copy()
-    referendum_result_by_regions.index = referendum_result_by_regions.index.astype(str)
+    idx = referendum_result_by_regions.index.astype(str)
+    referendum_result_by_regions.index = idx
 
     # Merge on the geojson 'code' column
     gdf = gdf.merge(
