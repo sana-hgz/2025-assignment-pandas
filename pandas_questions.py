@@ -14,10 +14,14 @@ import matplotlib.pyplot as plt
 
 
 def load_data():
-    """Load data from the CSV files referundum/regions/departments."""
-    referendum = pd.DataFrame({})
-    regions = pd.DataFrame({})
-    departments = pd.DataFrame({})
+    """Load data from the CSV files referendum/regions/departments.
+
+    Reads the CSV files from the `data/` folder and returns three
+    pandas.DataFrame objects: referendum, regions, departments.
+    """
+    referendum = pd.read_csv('data/referendum.csv', sep=';')
+    regions = pd.read_csv('data/regions.csv')
+    departments = pd.read_csv('data/departments.csv')
 
     return referendum, regions, departments
 
@@ -25,11 +29,30 @@ def load_data():
 def merge_regions_and_departments(regions, departments):
     """Merge regions and departments in one DataFrame.
 
+    The input DataFrames are the raw CSV reads. Regions uses columns
+    `code` and `name` while departments uses `region_code`, `code` and
+    `name`. We merge on `regions.code == departments.region_code` and
+    return the four columns renamed to the expected names.
+
     The columns in the final DataFrame should be:
     ['code_reg', 'name_reg', 'code_dep', 'name_dep']
     """
-
-    return pd.DataFrame({})
+    merged = pd.merge(
+        regions,
+        departments,
+        left_on='code',
+        right_on='region_code',
+        how='inner'
+    )
+    regions_and_departments = merged[[
+        'code_x', 'name_x', 'code_y', 'name_y'
+    ]].rename(columns={
+        'code_x': 'code_reg',
+        'name_x': 'name_reg',
+        'code_y': 'code_dep',
+        'name_y': 'name_dep'
+    })
+    return regions_and_departments
 
 
 def merge_referendum_and_areas(referendum, regions_and_departments):
@@ -41,8 +64,22 @@ def merge_referendum_and_areas(referendum, regions_and_departments):
     DOM-TOM-COM departments are departements that are remote from metropolitan
     France, like Guadaloupe, Reunion, or Tahiti.
     """
+    # Normalize department codes in the referendum table so they match the
+    # `code_dep` values coming from the departments CSV (e.g. '1' -> '01').
+    ref = referendum.copy()
+    ref['code_dep'] = ref['Department code'].astype(str).str.zfill(2)
 
-    return pd.DataFrame({})
+    referendum_and_areas = pd.merge(
+        ref,
+        regions_and_departments,
+        left_on='code_dep',
+        right_on='code_dep',
+        how='inner'
+    )
+    referendum_and_areas = referendum_and_areas[
+        ~referendum_and_areas['code_dep'].str.contains('Z')
+    ]
+    return referendum_and_areas
 
 
 def compute_referendum_result_by_regions(referendum_and_areas):
@@ -51,8 +88,15 @@ def compute_referendum_result_by_regions(referendum_and_areas):
     The return DataFrame should be indexed by `code_reg` and have columns:
     ['name_reg', 'Registered', 'Abstentions', 'Null', 'Choice A', 'Choice B']
     """
-
-    return pd.DataFrame({})
+    result = referendum_and_areas.groupby('code_reg').agg({
+        'name_reg': 'first',
+        'Registered': 'sum',
+        'Abstentions': 'sum',
+        'Null': 'sum',
+        'Choice A': 'sum',
+        'Choice B': 'sum'
+    })
+    return result
 
 
 def plot_referendum_map(referendum_result_by_regions):
@@ -64,8 +108,28 @@ def plot_referendum_map(referendum_result_by_regions):
       should display the rate of 'Choice A' over all expressed ballots.
     * Return a gpd.GeoDataFrame with a column 'ratio' containing the results.
     """
+    gdf = gpd.read_file('data/regions.geojson')
 
-    return gpd.GeoDataFrame({})
+    # Ensure keys are strings for consistent merging
+    gdf['code'] = gdf['code'].astype(str)
+    # referendum_result_by_regions is indexed by code_reg (strings like '01')
+    referendum_result_by_regions = referendum_result_by_regions.copy()
+    referendum_result_by_regions.index = referendum_result_by_regions.index.astype(str)
+
+    # Merge on the geojson 'code' column
+    gdf = gdf.merge(
+        referendum_result_by_regions,
+        left_on='code',
+        right_index=True,
+        how='left'
+    )
+
+    # Compute ratio safely (avoid division by zero)
+    expressed = gdf['Choice A'].fillna(0) + gdf['Choice B'].fillna(0)
+    gdf['ratio'] = gdf['Choice A'].fillna(0) / expressed.replace({0: pd.NA})
+
+    gdf.plot(column='ratio', legend=True, figsize=(12, 10))
+    return gdf
 
 
 if __name__ == "__main__":
